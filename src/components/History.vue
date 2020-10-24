@@ -1,37 +1,45 @@
 <template>
-  <div class="history">
-    <div class="body zy-scroll">
-      <div class="zy-table">
-        <div class="tHeader">
-          <span class="btn" @click="clearAllHistory">清空</span>
-        </div>
-        <div class="tBody zy-scroll">
-          <ul>
-            <li v-show="this.history.length === 0">无数据</li>
-            <li v-show="this.history.length > 0">
-              <span class="name">名字</span>
-              <span class="site">片源</span>
-              <span class="note">观看至</span>
-              <span class="operate">
-                <span class="btn"></span>
-                <span class="btn"></span>
-                <span class="btn"></span>
-                <span class="btn"></span>
-              </span>
-            </li>
-            <li v-for="(i, j) in history" :key="j" @click="historyItemEvent(i)">
-              <span class="name" @click.stop="detailEvent(i)">{{i.name}}</span>
-              <span class="site">{{getSiteName(i.site)}}</span>
-              <span class="note">第{{i.index+1}}集</span>
-              <span class="operate">
-                <span class="btn" @click.stop="playEvent(i)">播放</span>
-                <span class="btn" @click.stop="shareEvent(i)">分享</span>
-                <span class="btn" @click.stop="downloadEvent(i)">下载</span>
-                <span class="btn" @click.stop="removeHistoryItem(i)">删除</span>
-              </span>
-            </li>
-          </ul>
-        </div>
+  <div class="listpage" id="history">
+    <div class="listpage-content">
+      <div class="listpage-header">
+        <el-button @click.stop="exportHistory" icon="el-icon-upload2">导出</el-button>
+        <el-button @click.stop="importHistory" icon="el-icon-download">导入</el-button>
+        <el-button @click.stop="clearAllHistory" icon="el-icon-delete-solid">清空</el-button>
+      </div>
+      <div class="listpage-body" id="history-table">
+        <el-table size="mini" fit height="100%" :data="history" row-key="id" @row-click="detailEvent">
+          <el-table-column
+            prop="name"
+            label="片名">
+          </el-table-column>
+          <el-table-column
+            prop="site"
+            width="120"
+            label="片源">
+            <template slot-scope="scope">
+              <span>{{ getSiteName(scope.row.site) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column
+            prop="index"
+            width="120"
+            label="观看至">
+            <template slot-scope="scope">
+              <span>第{{ scope.row.index + 1 }}集</span>
+            </template>
+          </el-table-column>
+          <el-table-column
+            label="操作"
+            header-align="right"
+            align="right">
+            <template slot-scope="scope">
+              <el-button @click.stop="playEvent(scope.row)" type="text">播放</el-button>
+              <el-button @click.stop="shareEvent(scope.row)" type="text">分享</el-button>
+              <el-button @click.stop="downloadEvent(scope.row)" type="text">下载</el-button>
+              <el-button @click.stop="removeHistoryItem(scope.row)" type="text">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
       </div>
     </div>
   </div>
@@ -40,12 +48,16 @@
 import { mapMutations } from 'vuex'
 import { history, sites } from '../lib/dexie'
 import zy from '../lib/site/tools'
+import Sortable from 'sortablejs'
+import { remote } from 'electron'
+import fs from 'fs'
 const { clipboard } = require('electron')
+
 export default {
   name: 'history',
   data () {
     return {
-      history: history,
+      history: [],
       sites: []
     }
   },
@@ -160,6 +172,44 @@ export default {
         }
       })
     },
+    exportHistory () {
+      this.getAllhistory()
+      const arr = [...this.history]
+      const str = JSON.stringify(arr, null, 2)
+      const options = {
+        filters: [
+          { name: 'JSON file', extensions: ['json'] }
+        ]
+      }
+      remote.dialog.showSaveDialog(options).then(result => {
+        if (!result.canceled) {
+          fs.writeFileSync(result.filePath, str)
+          this.$message.success('已保存成功')
+        }
+      }).catch(err => {
+        this.$message.error(err)
+      })
+    },
+    importHistory () {
+      const options = {
+        filters: [
+          { name: 'JSON file', extensions: ['json'] }
+        ],
+        properties: ['openFile', 'multiSelections']
+      }
+      remote.dialog.showOpenDialog(options).then(result => {
+        if (!result.canceled) {
+          result.filePaths.forEach(file => {
+            var str = fs.readFileSync(file)
+            const json = JSON.parse(str)
+            history.bulkAdd(json).then(res => {
+              this.$message.success('导入成功')
+              this.getAllhistory()
+            })
+          })
+        }
+      })
+    },
     clearAllHistory () {
       history.clear().then(res => {
         this.history = []
@@ -181,44 +231,40 @@ export default {
         return site.name
       }
     },
-    historyItemEvent (e) {
-      this.video = {
-        key: e.site,
-        info: {
-          id: e.ids,
-          name: e.name,
-          type: e.type,
-          year: e.year,
-          index: e.index,
-          time: e.time
-        }
-      }
-    },
     removeHistoryItem (e) {
       history.remove(e.id).then(res => {
         this.getAllhistory()
       }).catch(err => {
         this.$message.warning('删除历史记录失败, 错误信息: ' + err)
       })
+    },
+    updateDatabase (data) {
+      history.clear().then(res => {
+        var id = length
+        data.forEach(ele => {
+          ele.id = id
+          id -= 1
+          history.add(ele)
+        })
+      })
+    },
+    rowDrop () {
+      const tbody = document.getElementById('history-table').querySelector('.el-table__body-wrapper tbody')
+      const _this = this
+      Sortable.create(tbody, {
+        onEnd ({ newIndex, oldIndex }) {
+          const currRow = _this.history.splice(oldIndex, 1)[0]
+          _this.history.splice(newIndex, 0, currRow)
+          _this.updateDatabase(_this.history)
+        }
+      })
     }
+  },
+  mounted () {
+    this.rowDrop()
   },
   created () {
     this.getAllhistory()
   }
 }
 </script>
-<style lang="scss" scoped>
-.history{
-  position: relative;
-  height: calc(100% - 40px);
-  width: 100%;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  border-radius: 5px;
-  .body{
-    width: 100%;
-    height: 100%;
-  }
-}
-</style>

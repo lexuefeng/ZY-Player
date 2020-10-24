@@ -35,7 +35,7 @@
           animationEffect="fadeInUp"
           backgroundColor="rgba(0, 0, 0, 0)">
             <template slot="item" slot-scope="props">
-              <div class="card">
+              <div class="card" v-show="!setting.excludeR18Films || !containsR18Keywords(props.data.type)">
                 <div class="img">
                   <img style="width: 100%" :src="props.data.pic" alt="" @load="$refs.waterfall.refresh()" @click="detailEvent(site, props.data)">
                   <div class="operate">
@@ -61,11 +61,11 @@
           <div class="zy-table">
             <div class="tBody">
               <ul>
-                <li v-for="(i, j) in list" :key="j" @click="detailEvent(site, i)">
+                <li v-for="(i, j) in list" :key="j" @click="detailEvent(site, i)" v-show="!setting.excludeR18Films || !containsR18Keywords(i.type)">
                   <span class="name">{{i.name}}</span>
                   <span class="type">{{i.type}}</span>
                   <span class="time">{{i.year}}</span>
-                  <span class="time">{{i.note}}</span>
+                  <span class="note">{{i.note}}</span>
                   <span class="last">{{i.last}}</span>
                   <span class="operate">
                     <span class="btn" @click.stop="playEvent(site, i)">播放</span>
@@ -75,7 +75,7 @@
                   </span>
                 </li>
               </ul>
-              <infinite-loading force-use-infinite-wrapper="tBody" :identifier="infiniteId" @infinite="infiniteHandler"></infinite-loading>
+              <infinite-loading force-use-infinite-wrapper :identifier="infiniteId" @infinite="infiniteHandler"></infinite-loading>
             </div>
           </div>
         </div>
@@ -87,10 +87,11 @@
               <ul>
                 <li v-for="(i, j) in searchContents" :key="j" @click="detailEvent(i.site, i)">
                   <span class="name">{{i.name}}</span>
-                  <span class="type">{{i.type}}</span>
-                  <span class="last">{{i.last}}</span>
                   <span class="site">{{i.site.name}}</span>
+                  <span class="type">{{i.type}}</span>
+                  <span class="time">{{i.year}}</span>
                   <span class="note">{{i.note}}</span>
+                  <span class="last">{{i.last}}</span>
                   <span class="operate">
                     <span class="btn" @click.stop="playEvent(i.site, i)">播放</span>
                     <span class="btn" @click.stop="starEvent(i.site, i)">收藏</span>
@@ -123,8 +124,6 @@ export default {
         class: false,
         classList: false,
         search: false,
-        img: true,
-        table: false,
         find: false
       },
       sites: [],
@@ -136,7 +135,9 @@ export default {
       infiniteId: +new Date(),
       searchList: [],
       searchTxt: '',
-      searchContents: []
+      searchContents: [],
+      // 福利片关键词
+      r18KeyWords: ['伦理', '倫理', '福利', '激情', '理论', '写真', '情色', '美女', '街拍', '赤足', '性感', '里番']
     }
   },
   components: {
@@ -178,6 +179,9 @@ export default {
     },
     setting () {
       return this.$store.getters.getSetting
+    },
+    sitesList () {
+      return this.$store.getters.getEditSites.sites // 需要监听的数据
     }
   },
   watch: {
@@ -187,13 +191,7 @@ export default {
     searchTxt () {
       this.searchChangeEvent()
     },
-    'setting.sitesList': {
-      handler (nv) {
-        this.getAllsites()
-      },
-      deep: true
-    },
-    '$store.state.editSites.sites': function () {
+    sitesList () {
       this.getAllsites()
     }
   },
@@ -216,6 +214,8 @@ export default {
           }
         })
       }
+      const _hmt = window._hmt
+      _hmt.push(['_trackEvent', 'site', 'change', e.name])
     },
     classClick (e) {
       this.show.classList = false
@@ -226,26 +226,20 @@ export default {
           this.infiniteId += 1
         }
       })
+      const _hmt = window._hmt
+      _hmt.push(['_trackEvent', 'class', 'change', e.name])
     },
     getClass () {
       return new Promise((resolve, reject) => {
         const key = this.site.key
         // 屏蔽主分类
         const classToHide = ['电影', '电影片', '电视剧', '连续剧', '综艺', '动漫']
-        // 福利片关键词
-        const r18KeyWords = ['福利', '激情', '伦理', '理论', '写真', '情色', '美女', '街拍', '赤足', '性感', '倫理', '里番']
-
         zy.class(key).then(res => {
           var allClass = [{ name: '最新', tid: 0 }]
           res.class.forEach(element => {
-            if (!classToHide.includes(element.name)) {
+            if (!this.setting.excludeRootClasses || !classToHide.includes(element.name)) {
               if (this.setting.excludeR18Films) {
-                var containKeyWord = false
-                r18KeyWords.forEach(ele => {
-                  if (element && element.name && element.name.includes(ele)) {
-                    containKeyWord = true
-                  }
-                })
+                const containKeyWord = this.containsR18Keywords(element.name)
                 if (!containKeyWord) {
                   allClass.push(element)
                 }
@@ -263,6 +257,13 @@ export default {
           reject(err)
         })
       })
+    },
+    containsR18Keywords (name) {
+      var containKeyWord = false
+      if (!name) {
+        return containKeyWord
+      }
+      return this.r18KeyWords.some(v => name.includes(v))
     },
     getPage () {
       return new Promise((resolve, reject) => {
@@ -331,6 +332,7 @@ export default {
           const docs = {
             key: site.key,
             ids: e.id,
+            site: site,
             name: e.name,
             type: e.type,
             year: e.year,
@@ -393,13 +395,11 @@ export default {
     },
     changeView () {
       if (this.view === 'Film') {
-        if (this.show.img) {
+        if (this.setting.view === 'picture') {
           this.$refs.waterfall.refresh()
         }
         this.getPage().then(() => {
           this.infiniteId += 1
-          if (this.show.img || this.show.table) {
-          }
         })
       }
     },
@@ -407,6 +407,15 @@ export default {
       search.all().then(res => {
         this.searchList = res.reverse()
       })
+    },
+    searchEvent (wd) {
+      if (this.setting.searchAllSites) {
+        this.searchAllSitesEvent(this.sites, wd)
+      } else {
+        this.searchSingleSiteEvent(this.site, wd)
+      }
+      const _hmt = window._hmt
+      _hmt.push(['_trackEvent', 'film', 'search', wd])
     },
     searchAllSitesEvent (sites, wd) {
       this.searchTxt = wd
@@ -421,7 +430,7 @@ export default {
           }
           this.getAllSearch()
         })
-        sites.forEach(site =>
+        sites.forEach(site => {
           zy.search(site.key, wd).then(res => {
             const type = Object.prototype.toString.call(res)
             if (type === '[object Array]') {
@@ -435,7 +444,7 @@ export default {
               this.searchContents.push(res)
             }
           })
-        )
+        })
       } else {
         this.show.find = false
         this.getClass().then(res => {
@@ -443,13 +452,6 @@ export default {
             this.infiniteId += 1
           }
         })
-      }
-    },
-    searchEvent (wd) {
-      if (this.setting.searchAllSites) {
-        this.searchAllSitesEvent(this.sites, wd)
-      } else {
-        this.searchSingleSiteEvent(this.site, wd)
       }
     },
     searchSingleSiteEvent (site, wd) {
@@ -469,30 +471,23 @@ export default {
         this.show.class = true
         this.searchContents = []
         this.show.find = false
-        if (this.show.img) {
+        if (this.setting.view === 'picture') {
           this.$refs.waterfall.refresh()
         }
       }
     },
-    getAllsites (nv) {
-      if (nv) {
-        sites.all().then(res => {
-          this.sites = res
-          for (const i of res) {
-            if (i.key === nv) {
-              this.site = i
-              this.siteClick(this.site)
-              return false
-            }
-          }
-        })
-      } else {
-        sites.all().then(res => {
-          this.sites = res
+    getAllsites () {
+      sites.all().then(res => {
+        if (res.length <= 0) {
+          this.site = {}
+          this.type = {}
+          this.list = []
+        } else {
+          this.sites = res.filter(x => x.isActive)
           this.site = this.sites[0]
           this.siteClick(this.site)
-        })
-      }
+        }
+      })
     }
   },
   created () {
